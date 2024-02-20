@@ -1,7 +1,4 @@
 #include <cstdio>
-#include <cstring>
-#include <cstdint>
-#include <climits>
 #include <cinttypes>
 #include <vector>
 #include <algorithm>
@@ -15,6 +12,7 @@ std::vector<u32> make_ref_string(FILE *file, size_t &log_size) {
     while (fscanf(file, "%" SCNx32, &page) == 1) {
         log_size++;
         page >>= 12;
+        // ignora pagina repetidamente acessada
         if (page == prev_page) {
             continue;
         }
@@ -29,18 +27,17 @@ size_t lru_hits(std::vector<u32> &ref_string, size_t max_frames) {
     std::vector<u32> frames;
 
     for (u32 page : ref_string) {
-        // se ja esta carregada, retira do meio da pilha
+        // se pagina ja esta carregada, retira do meio da pilha
         auto search = std::find(frames.begin(), frames.end(), page);
         if (search != frames.end()) {
             cache_hits++;
             frames.erase(search);
         }
-
-        // se está cheio, remove a base da pilha
-        if (frames.size() == max_frames) {
+        // se cache esta cheio, remove frame da base da pilha
+        else if (frames.size() == max_frames) {
             frames.erase(frames.begin());
         }
-        // sempre vai para o topo da pilha
+        // pagina acessada sempre vai para o topo da pilha
         frames.push_back(page);
     }
     return cache_hits;
@@ -49,9 +46,38 @@ size_t lru_hits(std::vector<u32> &ref_string, size_t max_frames) {
 
 size_t opt_hits(std::vector<u32> &ref_string, size_t max_frames) {
     size_t cache_hits = 0;
-    // TODO
+    std::vector<u32> frames;
+    std::vector<u32> frames_clone;
+
+    for (auto page = ref_string.begin(); page < ref_string.end(); page++) {
+        // se pagina ja esta carregada, não faz nada
+        auto search = std::find(frames.begin(), frames.end(), *page);
+        if (search != frames.end()) {
+            cache_hits++;
+            continue;
+        }
+        if (frames.size() == max_frames) {
+            // se cache esta cheio, remove o que sera usado por ultimo
+            frames_clone.assign(frames.begin(), frames.end());
+
+            for (auto future = page+1; frames_clone.size() > 1 && future < ref_string.end(); future++) {
+                auto search = std::find(frames.begin(), frames.end(), *future);
+                if (search != frames.end()) {
+                    auto to_erase = std::find(frames_clone.begin(), frames_clone.end(), *search);
+                    if (to_erase != frames_clone.end()) {
+                        frames_clone.erase(to_erase);
+                    }
+                }
+            }
+            auto to_erase = std::find(frames.begin(), frames.end(), *frames_clone.begin());
+            frames.erase(to_erase);
+        }
+        // pagina acessada sempre e inserida
+        frames.push_back(*page);
+    }
     return cache_hits;
 }
+
 
 int main(int argc, char **argv) {
     if (argc <= 1) {
@@ -74,12 +100,13 @@ int main(int argc, char **argv) {
         size_t num_hits = lru_hits(ref_string, max_frames);
         double fail_ratio = double(ref_size - num_hits) / ref_string.size();
         printf("Com %2zu frames livres, LRU sofreu %zu falhas (taxa de falha %lf)\n", max_frames, num_hits, fail_ratio);
+        fflush(stdout);
     }
-
     for (size_t max_frames = 4; max_frames <= 32; max_frames *= 2) {
         size_t num_hits = opt_hits(ref_string, max_frames);
         double fail_ratio = double(ref_size - num_hits) / ref_string.size();
         printf("Com %2zu frames livres, OPT sofreu %zu falhas (taxa de falha %lf)\n", max_frames, num_hits, fail_ratio);
+        fflush(stdout);
     }
 }
 
